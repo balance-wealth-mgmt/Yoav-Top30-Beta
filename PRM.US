@@ -1,0 +1,62 @@
+import streamlit as st
+import pandas as pd
+
+# --- Page Config ---
+st.set_page_config(page_title="PRM.US Financial Snapshot", layout="wide")
+
+# --- Title ---
+st.title("📊 Perimeter Solutions (PRM.US) – Financial Snapshot & Moat Analysis")
+
+# --- Financial Data Table ---
+data = {
+    "Metric": [
+        "Ticker", "Data's Date", "Industry", "Sector", "Description",
+        "P/E", "P/B", "FCF", "EV/FCF", "EV/EBITDA", "ROIC", "ROE", "ROA",
+        "PEG (Trailing)", "PEG (Forward)", "EPS", "Market Cap", "Revenue",
+        "Gross Profit", "Debt / Equity", "Enterprise Value",
+        "Dividend Yield", "Payout Ratio", "MOAT"
+    ],
+    "Value": [
+        "PRM.US", "2025-03-31", "Specialty Chemicals", "Basic Materials",
+        "Global provider of firefighting products and lubricant additives, specializing in fire retardants and phosphorus-based performance chemicals.",
+        "18.57", "2.01", "$18.93 Million", "59.41", "13.66", "4.19%", "11.76%", "3.97%",
+        "0.05", "4.14", "0.89", "$2.44 Billion", "$573.95 Million",
+        "$324.54 Million", "2.57", "$2.93 Billion",
+        "NONE", "NONE", "See Below"
+    ],
+    "Period": [
+        "—", "Q1 2025", "Q1 2025", "Q1 2025", "—",
+        "TTM", "Q1 2025", "Q1 2025", "Q1 2025", "TTM or Annualized", "TTM", "TTM", "TTM",
+        "TTM", "TTM", "TTM", "Q1 2025", "Q1 2025", "Q1 2025", "Q1 2025", "Q1 2025",
+        "Q1 2025", "Q1 2025", "—"
+    ]
+}
+df = pd.DataFrame(data)
+st.subheader("📈 Key Financial Metrics")
+st.dataframe(df, use_container_width=True)
+
+# --- Moat Analysis ---
+st.subheader("🛡️ MOAT Analysis: Perimeter Solutions (PRM.US)")
+
+st.markdown("""
+**Perimeter Solutions appears to possess elements of a _narrow economic moat_ due to:**
+
+- **Specialized Niche**: One of the few global suppliers of wildfire retardants and foams, with contracts from agencies like the U.S. Forest Service.
+- **High Switching Costs**: Government clients are locked in due to regulatory and logistical barriers.
+- **Regulatory Barriers**: Compliance-heavy certification processes limit competition.
+- **R&D and Technical Expertise**: Proprietary formulations and additive innovations strengthen product defensibility.
+
+**⚠️ Weaknesses:**
+
+- **Low ROIC and High EV/FCF**: Indicate operational inefficiencies or capital intensity.
+- **Unpredictable Revenue**: Wildfire-dependent demand introduces seasonal volatility.
+
+---
+
+### 🔍 Conclusion:
+PRM exhibits a **narrow moat**, supported by regulatory and technical barriers. However, **financials do not yet demonstrate durable competitive advantage**, keeping its moat **qualitative rather than deeply entrenched**.
+""")
+
+# --- Footer ---
+st.markdown("---")
+st.caption("Powered by EODHD Financial Data • Streamlit App by AnalystGPT")
