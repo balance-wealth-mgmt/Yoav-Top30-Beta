@@ -1,129 +1,122 @@
 import streamlit as st
 import requests
 import pandas as pd
-import math
 
-# --- Title ---
-st.set_page_config(page_title="PRM.US Dashboard", layout="centered")
-st.title("Perimeter Solutions (PRM.US) Financial Dashboard")
+st.set_page_config(page_title="PRM.US Financial Overview", layout="centered")
 
-# --- API Setup ---
+st.title("📊 PRM.US Financial Metrics Dashboard")
+
+# Load API key securely
 api_key = st.secrets["EODHD_API_KEY"]
-base_url = "https://eodhd.com/api/fundamentals/PRM.US"
 
-# --- Helper Functions ---
-@st.cache_data
-def get_fundamentals():
-    url = f"{base_url}?api_token={api_key}&fmt=json"
+ticker = "PRM.US"
+
+def get_fundamental_data(ticker, api_key, section):
+    url = f"https://eodhd.com/api/fundamentals/{ticker}?api_token={api_key}&fmt=json"
     response = requests.get(url)
-    return response.json() if response.status_code == 200 else {}
+    if response.status_code == 200:
+        return response.json().get(section, {})
+    else:
+        return {}
 
-def safe_get(dct, *keys):
-    for key in keys:
-        dct = dct.get(key, {})
-    return dct or None
+# Retrieve necessary data
+general = get_fundamental_data(ticker, api_key, "General")
+highlights = get_fundamental_data(ticker, api_key, "Highlights")
+valuation = get_fundamental_data(ticker, api_key, "Valuation")
+ratios = get_fundamental_data(ticker, api_key, "Financials::Metrics")
+balance_sheet = get_fundamental_data(ticker, api_key, "Financials::Balance_Sheet::quarterly")
+cashflow = get_fundamental_data(ticker, api_key, "Financials::Cash_Flow::quarterly")
+income = get_fundamental_data(ticker, api_key, "Financials::Income_Statement::quarterly")
 
-def calc_roic(net_income, total_debt, total_equity):
-    invested_capital = total_debt + total_equity if (total_debt and total_equity) else None
-    return (net_income / invested_capital) if invested_capital else None
+# Get Q1 2025 data (most recent)
+quarter = "2025-03-31"
+bs_q = balance_sheet.get(quarter, {})
+cf_q = cashflow.get(quarter, {})
+inc_q = income.get(quarter, {})
 
-def calc_debt_equity(total_debt, total_equity):
-    return (total_debt / total_equity) if (total_debt and total_equity) else None
-
-def calc_peg(pe_ratio, growth_rate):
-    return (pe_ratio / growth_rate) if (pe_ratio and growth_rate) else None
-
-# --- Data Fetch ---
-data = get_fundamentals()
-
-# --- Extracted Fields ---
-general = data.get("General", {})
-highlights = data.get("Highlights", {})
-valuation = data.get("Valuation", {})
-sector = general.get("Sector", "NONE")
-industry = general.get("Industry", "NONE")
-description = general.get("Description", "NONE")
-
-# Latest quarterly free cash flow
-q_cashflow = safe_get(data, "Financials", "Cash_Flow", "quarterly", "2025-03-31")
-fcf = q_cashflow.get("freeCashFlow") if q_cashflow else None
-
-# Balance sheet values for calculations
-q_balance = safe_get(data, "Financials", "Balance_Sheet", "quarterly", "2025-03-31")
-total_debt = q_balance.get("totalDebt") if q_balance else None
-total_equity = q_balance.get("totalEquity") if q_balance else None
-
-# Income statement for ROIC
-q_income = safe_get(data, "Financials", "Income_Statement", "quarterly", "2025-03-31")
-net_income = q_income.get("netIncome") if q_income else None
-
-# --- Calculations ---
-pe_ratio = highlights.get("PERatioTTM")
-pb_ratio = valuation.get("PriceBookMRQ")
+# Extract and calculate values
+market_cap = highlights.get("MarketCapitalization")
 ev = valuation.get("EnterpriseValue")
-ev_ebitda = valuation.get("EnterpriseValueEBITDA")
+fcf = cf_q.get("freeCashFlow")
+ev_fcf = ev / fcf if ev and fcf else None
+pb = valuation.get("PriceBookMRQ")
+pe = highlights.get("PERatio")
 eps = highlights.get("EarningsShare")
+ev_ebitda = valuation.get("EnterpriseValueEbitda")
 roe = highlights.get("ReturnOnEquityTTM")
 roa = highlights.get("ReturnOnAssetsTTM")
-div_yield = highlights.get("DividendYield")
-payout_ratio = highlights.get("PayoutRatio")
-market_cap = highlights.get("MarketCapitalization")
-revenue = highlights.get("RevenueTTM")
-gross_profit = highlights.get("GrossProfitTTM")
-peg_ratio = calc_peg(pe_ratio, highlights.get("EarningsGrowth", 0.01))  # fallback to avoid div by 0
-roic = calc_roic(net_income, total_debt, total_equity)
-de_ratio = calc_debt_equity(total_debt, total_equity)
+industry = general.get("Industry")
+sector = general.get("Sector")
+description = general.get("Description")
+revenue = inc_q.get("totalRevenue")
+gross_profit = inc_q.get("grossProfit")
+total_debt = bs_q.get("totalDebt")
+total_equity = bs_q.get("totalStockholdersEquity")
+de_ratio = total_debt / total_equity if total_debt and total_equity else None
+ttm_net_income = highlights.get("NetIncomeTTM")
+ttm_invested_capital = bs_q.get("totalAssets") - bs_q.get("totalCurrentLiabilities") if bs_q.get("totalAssets") and bs_q.get("totalCurrentLiabilities") else None
+roic = (ttm_net_income / ttm_invested_capital) * 100 if ttm_net_income and ttm_invested_capital else None
+peg_trailing = pe / highlights["EPSGrowthTTM"] if pe and highlights.get("EPSGrowthTTM") else None
+peg_forward = pe / highlights["EPSGrowthNext5Y"] if pe and highlights.get("EPSGrowthNext5Y") else None
 
-# --- Display Table ---
-st.subheader("📊 Key Metrics")
-
-table_data = {
-    "Ticker": ["PRM.US"],
-    "Date": ["2025-03-31"],
-    "Sector": [sector],
-    "Industry": [industry],
-    "P/E": [pe_ratio],
-    "P/B": [pb_ratio],
-    "EPS": [eps],
-    "Market Cap": [market_cap],
-    "Revenue": [revenue],
-    "Gross Profit": [gross_profit],
-    "Free Cash Flow": [fcf],
-    "EV": [ev],
-    "EV/EBITDA": [ev_ebitda],
-    "ROE (TTM)": [roe],
-    "ROA (TTM)": [roa],
-    "ROIC": [roic],
-    "Debt / Equity": [de_ratio],
-    "PEG": [peg_ratio],
-    "Dividend Yield": [div_yield],
-    "Payout Ratio": [payout_ratio],
+# Assemble DataFrame
+data = {
+    "Metric": [
+        "Ticker", "Data's Date", "Industry", "Sector", "Description",
+        "P/E", "P/B", "FCF", "EV/FCF", "EV/EBITDA",
+        "ROIC", "ROE", "ROA", "PEG (Trailing)", "PEG (Forward)", "EPS",
+        "Market Cap", "Revenue", "Gross Profit", "Debt / Equity", "Enterprise Value",
+        "Dividend Yield", "Payout Ratio", "MOAT"
+    ],
+    "Value": [
+        ticker, "2025-03-31", industry, sector, description,
+        f"{pe:.2f}" if pe else "NONE",
+        f"{pb:.2f}" if pb else "NONE",
+        f"${fcf / 1e6:.2f} Million" if fcf else "NONE",
+        f"{ev_fcf:.2f}" if ev_fcf else "NONE",
+        f"{ev_ebitda:.2f}" if ev_ebitda else "NONE",
+        f"{roic:.2f}%" if roic else "NONE",
+        f"{roe:.2f}%" if roe else "NONE",
+        f"{roa:.2f}%" if roa else "NONE",
+        f"{peg_trailing:.2f}" if peg_trailing else "NONE",
+        f"{peg_forward:.2f}" if peg_forward else "NONE",
+        f"{eps:.2f}" if eps else "NONE",
+        f"${market_cap / 1e9:.2f} Billion" if market_cap else "NONE",
+        f"${revenue / 1e6:.2f} Million" if revenue else "NONE",
+        f"${gross_profit / 1e6:.2f} Million" if gross_profit else "NONE",
+        f"{de_ratio:.2f}" if de_ratio else "NONE",
+        f"${ev / 1e9:.2f} Billion" if ev else "NONE",
+        "NONE",  # Dividend Yield
+        "NONE",  # Payout Ratio
+        "See below"
+    ],
+    "Period": [
+        "-", "Q1 2025", "Q1 2025", "Q1 2025", "-", 
+        "TTM", "Q1 2025", "Q1 2025", "Q1 2025", "TTM",
+        "TTM", "TTM", "TTM", "TTM", "TTM", "TTM",
+        "Q1 2025", "Q1 2025", "Q1 2025", "Q1 2025", "Q1 2025",
+        "Q1 2025", "Q1 2025", "-"
+    ]
 }
 
-df = pd.DataFrame(table_data).T
-df.columns = ["Value"]
-st.dataframe(df)
+df = pd.DataFrame(data)
 
-# --- Description ---
-st.subheader("🏢 Company Description")
-st.markdown(description)
+# Display table
+st.dataframe(df, use_container_width=True)
 
-# --- Moat Analysis ---
-st.subheader("🛡️ MOAT Analysis: Perimeter Solutions (PRM.US)")
+# Moat analysis
+st.markdown("### 🛡️ MOAT Analysis: Perimeter Solutions (PRM.US)")
 st.markdown("""
 Perimeter Solutions appears to possess elements of a **narrow economic moat** due to:
 
-- **Specialized Niche**: PRM is one of very few global providers of wildfire retardants and foams under long-term contracts with agencies like the U.S. Forest Service.
-- **High Switching Costs**: Regulatory and logistical barriers prevent easy supplier substitution.
-- **Regulatory Barriers**: Certification and approval processes discourage new market entrants.
-- **R&D and IP**: Specialized phosphorus pentasulfide-based additives help differentiate PRM technically.
+- **Specialized Niche**: One of the few global providers of wildfire retardants and foams under long-term government contracts.
+- **High Switching Costs**: Municipalities and agencies face safety/logistical hurdles in changing vendors.
+- **Regulatory Barriers**: Compliance and certifications slow new entrants.
+- **R&D and IP**: Differentiation in phosphorus additive chemistry.
 
-**Weaknesses:**
-- Low ROIC and limited FCF suggest efficiency concerns.
-- Seasonality from wildfire activity impacts cash flows.
+**Weaknesses**:
+- Low ROIC and erratic FCF signal efficiency concerns.
+- Seasonality of revenue makes cash flow less predictable.
 
-**Conclusion**: PRM exhibits a **narrow moat**, supported by regulatory entrenchment and mission-critical products, though financials remain a concern.
+**Conclusion**: Narrow moat, built on regulatory and technical entrenchment, though financials remain uneven.
 """)
-
-# --- Footer ---
-st.caption("Data provided by EODHD.com")
