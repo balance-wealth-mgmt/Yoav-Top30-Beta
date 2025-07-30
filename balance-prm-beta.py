@@ -1,15 +1,17 @@
+from pathlib import Path
+
+# Rewriting the full corrected script again after kernel reset
+final_script = """
 import streamlit as st
 import requests
 import pandas as pd
-import os
 
-# Load API key from Streamlit secrets
+# Load API key from secrets
 API_KEY = st.secrets["EODHD_API_KEY"]
 TICKER = "PRM.US"
 
-# Helper to format values
 def fmt(val, pct=False):
-    if val is None:
+    if val is None or val == 0:
         return "NONE"
     try:
         val = float(val)
@@ -24,61 +26,78 @@ def fmt(val, pct=False):
         else:
             return f"{val:.2f}"
     except:
-        return val
+        return "NONE"
 
-# API fetch helper
 def fetch_section(ticker, section):
     url = f"https://eodhd.com/api/fundamentals/{ticker}?filter={section}&api_token={API_KEY}&fmt=json"
     res = requests.get(url)
     return res.json() if res.ok else {}
 
-# Load all necessary data
+# Fetch all sections
 general = fetch_section(TICKER, "General")
 highlights = fetch_section(TICKER, "Highlights")
 valuation = fetch_section(TICKER, "Valuation")
 cf_q = fetch_section(TICKER, "Financials::Cash_Flow::quarterly::2025-03-31")
 
-# Extract metrics
+# Extract values with fallback
+def safe_get(d, key):
+    return d.get(key) if d and isinstance(d, dict) else None
+
+# PEG fallback calc (PE / growth %), if PE and EPS growth available
+pe_ratio = safe_get(valuation, "TrailingPE")
+eps_growth = safe_get(highlights, "EpsGrowth")
+peg_ratio = float(pe_ratio) / float(eps_growth) if pe_ratio and eps_growth else None
+
+# Debt/Equity calc
+debt = safe_get(highlights, "TotalDebt")
+equity = safe_get(highlights, "ShareholdersEquity")
+debt_equity = float(debt) / float(equity) if debt and equity else None
+
+# ROIC approx = NOPAT / (Total Debt + Equity)
+net_income = safe_get(highlights, "NetIncome")
+tax_rate = 0.21
+nopat = float(net_income) * (1 - tax_rate) if net_income else None
+capital = float(debt) + float(equity) if debt and equity else None
+roic = float(nopat) / float(capital) if nopat and capital else None
+
+# EV/FCF
+ev = safe_get(valuation, "EnterpriseValue")
+fcf = safe_get(cf_q, "freeCashFlow")
+ev_fcf = float(ev) / float(fcf) if ev and fcf and float(fcf) != 0 else None
+
 data = {
     "Ticker": TICKER,
     "Data's Date": "2025-03-31",
-    "Industry": general.get("Industry", "NONE"),
-    "Sector": general.get("Sector", "NONE"),
-    "P/E": fmt(valuation.get("TrailingPE")),
-    "P/B": fmt(valuation.get("PriceBookMRQ")),
-    "FCF": fmt(cf_q.get("freeCashFlow")),
-    "EV/FCF": fmt(
-        float(valuation["EnterpriseValue"]) / float(cf_q["freeCashFlow"])
-    ) if valuation.get("EnterpriseValue") and cf_q.get("freeCashFlow") not in (None, "0") else "NONE",
-    "EV/EBITDA": fmt(valuation.get("EnterpriseValueEbitda")),
-    "ROIC": "NONE",  # Not directly available
-    "ROE": fmt(highlights.get("ReturnOnEquityTTM"), pct=True),
-    "ROA": fmt(highlights.get("ReturnOnAssetsTTM"), pct=True),
-    "PEG": fmt(highlights.get("PeRatioHigh")),
-    "EPS": fmt(highlights.get("EarningsShare")),
-    "Market Cap": fmt(highlights.get("MarketCapitalization")),
-    "Revenue": fmt(highlights.get("RevenueTTM")),
-    "Gross Profit": fmt(highlights.get("GrossProfitTTM")),
-    "Debt / Equity": fmt(
-        float(highlights["TotalDebt"]) / float(highlights["ShareholdersEquity"])
-    ) if highlights.get("TotalDebt") and highlights.get("ShareholdersEquity") else "NONE",
-    "Dividend Yield": fmt(highlights.get("DividendYield"), pct=True),
-    "Payout Ratio": fmt(highlights.get("PayoutRatio"), pct=True),
-    "Enterprise Value": fmt(valuation.get("EnterpriseValue")),
+    "Industry": safe_get(general, "Industry"),
+    "Sector": safe_get(general, "Sector"),
+    "P/E": fmt(pe_ratio),
+    "P/B": fmt(safe_get(valuation, "PriceBookMRQ")),
+    "FCF": fmt(fcf),
+    "EV/FCF": fmt(ev_fcf),
+    "EV/EBITDA": fmt(safe_get(valuation, "EnterpriseValueEbitda")),
+    "ROIC": fmt(roic, pct=True),
+    "ROE": fmt(safe_get(highlights, "ReturnOnEquityTTM"), pct=True),
+    "ROA": fmt(safe_get(highlights, "ReturnOnAssetsTTM"), pct=True),
+    "PEG": fmt(peg_ratio),
+    "EPS": fmt(safe_get(highlights, "EarningsShare")),
+    "Market Cap": fmt(safe_get(highlights, "MarketCapitalization")),
+    "Revenue": fmt(safe_get(highlights, "RevenueTTM")),
+    "Gross Profit": fmt(safe_get(highlights, "GrossProfitTTM")),
+    "Debt / Equity": fmt(debt_equity),
+    "Dividend Yield": fmt(safe_get(highlights, "DividendYield"), pct=True),
+    "Payout Ratio": fmt(safe_get(highlights, "PayoutRatio"), pct=True),
+    "Enterprise Value": fmt(ev),
     "Period": "Q1 2025",
-    "Description": general.get("Description", "NONE")
+    "Description": safe_get(general, "Description")
 }
 
-# Show Table
 st.title("📊 PRM.US – Financial Snapshot & MOAT Analysis")
-
 st.subheader("Summary Table")
 df = pd.DataFrame(data.items(), columns=["Metric", "Value"])
 st.dataframe(df, use_container_width=True)
 
-# Moat Analysis
 st.subheader("🛡️ MOAT Analysis: Perimeter Solutions (PRM.US)")
-st.markdown("""
+st.markdown(\"""
 Perimeter Solutions appears to possess elements of a **narrow economic moat** due to:
 
 - **Specialized Niche**: The company is one of very few global providers of wildfire retardants and foams, operating under long-term contracts with federal agencies like the U.S. Forest Service.
@@ -92,7 +111,12 @@ Perimeter Solutions appears to possess elements of a **narrow economic moat** du
 
 ### 🔍 Conclusion:
 PRM exhibits a **narrow moat**, driven primarily by regulatory entrenchment and mission-critical products, though financials (e.g., FCF and ROIC) do not yet reinforce long-term economic power.
-""")
-
+\""")
 st.markdown("---")
 st.caption("Data sourced from EODHD · Powered by Streamlit")
+"""
+
+# Save the updated script
+script_path = "/mnt/data/app_corrected_full.py"
+Path(script_path).write_text(final_script)
+script_path
