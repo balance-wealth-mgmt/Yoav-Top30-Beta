@@ -1,3 +1,7 @@
+from pathlib import Path
+
+# Full corrected Streamlit script with fixed syntax error
+script_content = """
 import streamlit as st
 import requests
 import pandas as pd
@@ -67,4 +71,55 @@ data = {
     "P/E": fmt(pe_ratio),
     "P/B": fmt(safe_get(valuation, "PriceBookMRQ")),
     "FCF": fmt(fcf),
-    "E
+    "EV/FCF": fmt(ev_fcf),
+    "EV/EBITDA": fmt(safe_get(valuation, "EnterpriseValueEbitda")),
+    "ROIC": fmt(roic, pct=True),
+    "ROE": fmt(safe_get(highlights, "ReturnOnEquityTTM"), pct=True),
+    "ROA": fmt(safe_get(highlights, "ReturnOnAssetsTTM"), pct=True),
+    "PEG": fmt(peg_ratio),
+    "EPS": fmt(safe_get(highlights, "EarningsShare")),
+    "Market Cap": fmt(safe_get(highlights, "MarketCapitalization")),
+    "Revenue": fmt(safe_get(highlights, "RevenueTTM")),
+    "Gross Profit": fmt(safe_get(highlights, "GrossProfitTTM")),
+    "Debt / Equity": fmt(debt_equity),
+    "Dividend Yield": fmt(safe_get(highlights, "DividendYield"), pct=True),
+    "Payout Ratio": fmt(safe_get(highlights, "PayoutRatio"), pct=True),
+    "Enterprise Value": fmt(ev),
+    "Period": "Q1 2025",
+    "Description": safe_get(general, "Description")
+}
+
+# STREAMLIT UI
+st.set_page_config(page_title="PRM Financials", layout="wide")
+st.title("📊 PRM.US – Financial Snapshot & MOAT Analysis")
+
+st.subheader("Summary Table")
+df = pd.DataFrame(data.items(), columns=["Metric", "Value"])
+st.dataframe(df, use_container_width=True)
+
+st.subheader("🛡️ MOAT Analysis: Perimeter Solutions (PRM.US)")
+st.markdown(\"\"\"
+Perimeter Solutions appears to possess elements of a **narrow economic moat** due to:
+
+- **Specialized Niche**: The company is one of very few global providers of wildfire retardants and foams, operating under long-term contracts with federal agencies like the U.S. Forest Service.
+- **High Switching Costs**: Governments and municipalities are unlikely to switch suppliers easily due to safety, approval, and logistic constraints — giving PRM a defensible position.
+- **Regulatory Barriers**: Fire retardant products often require certifications and lengthy compliance processes, reducing new entrant threats.
+- **R&D and IP**: The specialty chemicals segment relies on unique formulations and expertise in phosphorus pentasulfide-based additives, which provides technical differentiation.
+
+### Weaknesses:
+- **Low ROIC and weak FCF** indicate operational inefficiencies.
+- **Seasonal revenue** tied to wildfire activity makes cash flows less predictable.
+
+### 🔍 Conclusion:
+PRM exhibits a **narrow moat**, driven primarily by regulatory entrenchment and mission-critical products, though financials (e.g., FCF and ROIC) do not yet reinforce long-term economic power.
+\"\"\")
+
+st.markdown("---")
+st.caption("Data sourced from EODHD · App built with ❤️ using Streamlit")
+"""
+
+# Save to file
+script_path = "/mnt/data/app_final.py"
+Path(script_path).write_text(script_content)
+
+script_path
