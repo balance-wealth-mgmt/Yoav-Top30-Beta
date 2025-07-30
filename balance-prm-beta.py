@@ -119,3 +119,4 @@ st.markdown(\"""
 - Highly seasonal revenue tied to wildfire activity introduces cash flow unpredictability.
 
 **Conclusion**: PRM exhibits a **narrow moat** due to regulatory entrenchment and mission-critical offerings. Financial performance, however, does not yet confirm strong long-term advantages.
+\""")
