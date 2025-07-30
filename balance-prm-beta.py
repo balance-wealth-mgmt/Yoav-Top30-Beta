@@ -1,122 +1,129 @@
 import streamlit as st
 import requests
 import pandas as pd
+import math
 
-st.set_page_config(page_title="PRM.US Financial Dashboard", layout="wide")
+# --- Title ---
+st.set_page_config(page_title="PRM.US Dashboard", layout="centered")
+st.title("Perimeter Solutions (PRM.US) Financial Dashboard")
 
-# Load secrets
-api_key = st.secrets["eodhd"]["api_key"]
-ticker = "PRM.US"
+# --- API Setup ---
+api_key = st.secrets["EODHD_API_KEY"]
+base_url = "https://eodhd.com/api/fundamentals/PRM.US"
 
-@st.cache_data(ttl=3600)
-def get_fundamentals(ticker):
-    base_url = "https://eodhd.com/api/fundamentals"
-    url = f"{base_url}/{ticker}?api_token={api_key}&fmt=json"
-    return requests.get(url).json()
+# --- Helper Functions ---
+@st.cache_data
+def get_fundamentals():
+    url = f"{base_url}?api_token={api_key}&fmt=json"
+    response = requests.get(url)
+    return response.json() if response.status_code == 200 else {}
 
-data = get_fundamentals(ticker)
-
-# Extract and calculate metrics
-def safe_get(d, keys, default="NONE"):
+def safe_get(dct, *keys):
     for key in keys:
-        if d and key in d:
-            d = d[key]
-        else:
-            return default
-    return d
+        dct = dct.get(key, {})
+    return dct or None
 
-valuation = data.get("Valuation", {})
-highlights = data.get("Highlights", {})
+def calc_roic(net_income, total_debt, total_equity):
+    invested_capital = total_debt + total_equity if (total_debt and total_equity) else None
+    return (net_income / invested_capital) if invested_capital else None
+
+def calc_debt_equity(total_debt, total_equity):
+    return (total_debt / total_equity) if (total_debt and total_equity) else None
+
+def calc_peg(pe_ratio, growth_rate):
+    return (pe_ratio / growth_rate) if (pe_ratio and growth_rate) else None
+
+# --- Data Fetch ---
+data = get_fundamentals()
+
+# --- Extracted Fields ---
 general = data.get("General", {})
-financials = data.get("Financials", {}).get("Cash_Flow", {}).get("quarterly", {}).get("2025-03-31", {})
-balance = data.get("Financials", {}).get("Balance_Sheet", {}).get("quarterly", {}).get("2025-03-31", {})
+highlights = data.get("Highlights", {})
+valuation = data.get("Valuation", {})
+sector = general.get("Sector", "NONE")
+industry = general.get("Industry", "NONE")
+description = general.get("Description", "NONE")
 
-pe = safe_get(valuation, ["TrailingPE"])
-pb = safe_get(valuation, ["PriceBookMRQ"])
-eps = safe_get(highlights, ["EarningsShare"])
-fcf = safe_get(financials, ["freeCashFlow"])
-ev = safe_get(valuation, ["EnterpriseValue"])
-ev_ebitda = safe_get(valuation, ["EnterpriseValueEbitda"])
-roe = safe_get(highlights, ["ReturnOnEquityTTM"])
-roa = safe_get(highlights, ["ReturnOnAssetsTTM"])
-revenue = safe_get(highlights, ["RevenueTTM"])
-gross_profit = safe_get(highlights, ["GrossProfitTTM"])
-market_cap = safe_get(highlights, ["MarketCapitalization"])
-div_yield = safe_get(highlights, ["DividendYield"])
-payout = safe_get(highlights, ["PayoutRatio"])
-industry = safe_get(general, ["Industry"])
-sector = safe_get(general, ["Sector"])
-description = safe_get(general, ["Description"])
-total_debt = safe_get(balance, ["shortLongTermDebtTotal", "shortTermDebt"]) or 0
-equity = safe_get(balance, ["totalStockholderEquity"]) or 0
+# Latest quarterly free cash flow
+q_cashflow = safe_get(data, "Financials", "Cash_Flow", "quarterly", "2025-03-31")
+fcf = q_cashflow.get("freeCashFlow") if q_cashflow else None
 
-# Calculated fields
-try:
-    peg = round(float(pe) / (float(highlights.get("EarningsGrowth", 0)) or 1), 2)
-except:
-    peg = "NONE"
+# Balance sheet values for calculations
+q_balance = safe_get(data, "Financials", "Balance_Sheet", "quarterly", "2025-03-31")
+total_debt = q_balance.get("totalDebt") if q_balance else None
+total_equity = q_balance.get("totalEquity") if q_balance else None
 
-try:
-    roic = round(float(highlights.get("OperatingIncome", 0)) / (float(highlights.get("InvestedCapital", 0)) or 1), 2)
-except:
-    roic = "NONE"
+# Income statement for ROIC
+q_income = safe_get(data, "Financials", "Income_Statement", "quarterly", "2025-03-31")
+net_income = q_income.get("netIncome") if q_income else None
 
-try:
-    debt_equity = round(float(total_debt) / (float(equity) or 1), 2)
-except:
-    debt_equity = "NONE"
+# --- Calculations ---
+pe_ratio = highlights.get("PERatioTTM")
+pb_ratio = valuation.get("PriceBookMRQ")
+ev = valuation.get("EnterpriseValue")
+ev_ebitda = valuation.get("EnterpriseValueEBITDA")
+eps = highlights.get("EarningsShare")
+roe = highlights.get("ReturnOnEquityTTM")
+roa = highlights.get("ReturnOnAssetsTTM")
+div_yield = highlights.get("DividendYield")
+payout_ratio = highlights.get("PayoutRatio")
+market_cap = highlights.get("MarketCapitalization")
+revenue = highlights.get("RevenueTTM")
+gross_profit = highlights.get("GrossProfitTTM")
+peg_ratio = calc_peg(pe_ratio, highlights.get("EarningsGrowth", 0.01))  # fallback to avoid div by 0
+roic = calc_roic(net_income, total_debt, total_equity)
+de_ratio = calc_debt_equity(total_debt, total_equity)
 
-try:
-    ev_fcf = round(float(ev) / (float(fcf) or 1), 2)
-except:
-    ev_fcf = "NONE"
+# --- Display Table ---
+st.subheader("📊 Key Metrics")
 
-metrics = {
-    "Ticker": ticker,
-    "Data's Date": "2025-03-31",
-    "Industry": industry,
-    "Sector": sector,
-    "P/E": pe,
-    "P/B": pb,
-    "FCF": fcf,
-    "EV/FCF": ev_fcf,
-    "EV/EBITDA": ev_ebitda,
-    "ROIC": roic,
-    "ROE": roe,
-    "ROA": roa,
-    "PEG": peg,
-    "EPS": eps,
-    "Market Cap": market_cap,
-    "Enterprise Value": ev,
-    "Revenue": revenue,
-    "Gross Profit": gross_profit,
-    "Debt / Equity": debt_equity,
-    "Dividend Yield": div_yield,
-    "Payout Ratio": payout,
-    "TTM/Q1": {
-        "ROA": "TTM", "ROE": "TTM", "EPS": "TTM", "Revenue": "TTM", "Gross Profit": "TTM"
-    }
+table_data = {
+    "Ticker": ["PRM.US"],
+    "Date": ["2025-03-31"],
+    "Sector": [sector],
+    "Industry": [industry],
+    "P/E": [pe_ratio],
+    "P/B": [pb_ratio],
+    "EPS": [eps],
+    "Market Cap": [market_cap],
+    "Revenue": [revenue],
+    "Gross Profit": [gross_profit],
+    "Free Cash Flow": [fcf],
+    "EV": [ev],
+    "EV/EBITDA": [ev_ebitda],
+    "ROE (TTM)": [roe],
+    "ROA (TTM)": [roa],
+    "ROIC": [roic],
+    "Debt / Equity": [de_ratio],
+    "PEG": [peg_ratio],
+    "Dividend Yield": [div_yield],
+    "Payout Ratio": [payout_ratio],
 }
 
-df = pd.DataFrame.from_dict(metrics, orient='index', columns=["Value"])
-st.title("📊 Perimeter Solutions (PRM.US) Financial Overview")
+df = pd.DataFrame(table_data).T
+df.columns = ["Value"]
 st.dataframe(df)
 
-st.subheader("🧾 Description")
-st.write(description)
+# --- Description ---
+st.subheader("🏢 Company Description")
+st.markdown(description)
 
-st.subheader("🛡️ MOAT Analysis")
-st.markdown(\"""
-**Perimeter Solutions** appears to possess elements of a **narrow economic moat** due to:
+# --- Moat Analysis ---
+st.subheader("🛡️ MOAT Analysis: Perimeter Solutions (PRM.US)")
+st.markdown("""
+Perimeter Solutions appears to possess elements of a **narrow economic moat** due to:
 
-- **Specialized Niche**: One of few global providers of wildfire retardants and foams, working with agencies like the U.S. Forest Service.
-- **High Switching Costs**: Governments and municipalities rarely switch suppliers due to safety and logistic dependencies.
-- **Regulatory Barriers**: Products require certifications and compliance, limiting new entrants.
-- **R&D and IP**: Unique formulations for phosphorus pentasulfide-based additives offer technical advantages.
+- **Specialized Niche**: PRM is one of very few global providers of wildfire retardants and foams under long-term contracts with agencies like the U.S. Forest Service.
+- **High Switching Costs**: Regulatory and logistical barriers prevent easy supplier substitution.
+- **Regulatory Barriers**: Certification and approval processes discourage new market entrants.
+- **R&D and IP**: Specialized phosphorus pentasulfide-based additives help differentiate PRM technically.
 
-**Weaknesses**:
-- Low ROIC and weak FCF highlight operational inefficiencies.
-- Highly seasonal revenue tied to wildfire activity introduces cash flow unpredictability.
+**Weaknesses:**
+- Low ROIC and limited FCF suggest efficiency concerns.
+- Seasonality from wildfire activity impacts cash flows.
 
-**Conclusion**: PRM exhibits a **narrow moat** due to regulatory entrenchment and mission-critical offerings. Financial performance, however, does not yet confirm strong long-term advantages.
-\""")
+**Conclusion**: PRM exhibits a **narrow moat**, supported by regulatory entrenchment and mission-critical products, though financials remain a concern.
+""")
+
+# --- Footer ---
+st.caption("Data provided by EODHD.com")
