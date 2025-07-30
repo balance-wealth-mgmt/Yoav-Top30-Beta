@@ -1,101 +1,110 @@
 import streamlit as st
 import requests
-import pandas as pd
-import datetime
+import os
 
-# Load API token from Streamlit secrets
-eodhd_token = st.secrets["eodhd"]["api_key"]
-
-# --- SETTINGS ---
+# Load EODHD API key securely
+api_key = st.secrets["eodhd"]["api_key"]
 ticker = "PRM.US"
-base_url = "https://eodhd.com/api"
 
-def get_fundamental_data():
-    url = f"{base_url}/fundamentals/{ticker}?api_token={eodhd_token}&fmt=json"
+@st.cache_data(show_spinner=True)
+def fetch_fundamentals(symbol: str, section: str):
+    url = f"https://eodhd.com/api/fundamentals/{symbol}?filter={section}&api_token={api_key}&fmt=json"
     response = requests.get(url)
-    return response.json()
+    if response.ok:
+        return response.json()
+    return {}
 
-def get_market_cap():
-    url = f"{base_url}/fundamentals/{ticker}?api_token={eodhd_token}&filter=Valuation::Market_Capitalization&fmt=json"
+@st.cache_data(show_spinner=True)
+def fetch_fundamental_point(symbol: str, section: str, point: str):
+    url = f"https://eodhd.com/api/fundamentals/{symbol}?filter={section}::{point}&api_token={api_key}&fmt=json"
     response = requests.get(url)
-    return response.json()
+    if response.ok:
+        return response.json()
+    return {}
 
-def get_financial_value(filter_str):
-    url = f"{base_url}/fundamentals/{ticker}?api_token={eodhd_token}&filter={filter_str}&fmt=json"
-    response = requests.get(url)
-    return response.json()
+st.title(f"🧾 Financial Dashboard — {ticker}")
+st.write("All data sourced via EODHD API.")
 
-def calculate_ev_fcf(ev, fcf):
-    try:
-        return round(ev / fcf, 2) if fcf != 0 else None
-    except:
-        return None
+# --- Fetch Data ---
+general = fetch_fundamentals(ticker, "General")
+highlights = fetch_fundamentals(ticker, "Highlights")
+valuation = fetch_fundamentals(ticker, "Valuation")
+cash_flow_q = fetch_fundamentals(ticker, "Financials::Cash_Flow::quarterly::2025-03-31")
+bs_q = fetch_fundamentals(ticker, "Financials::Balance_Sheet::quarterly::2025-03-31")
+income_q = fetch_fundamentals(ticker, "Financials::Income_Statement::quarterly::2025-03-31")
 
-def calculate_debt_equity(total_liabilities, total_equity):
-    try:
-        return round(total_liabilities / total_equity, 2)
-    except:
-        return None
+# --- Extract Metrics ---
+metrics = []
 
-def main():
-    st.title("PRM.US Financial Metrics Dashboard")
+def add_metric(label, value, period):
+    metrics.append((label, value if value is not None else "N/A", period))
 
-    fundamentals = get_fundamental_data()
+add_metric("Ticker", ticker, "—")
+add_metric("Data's Date", "2025-03-31", "Q1 2025")
+add_metric("Industry", general.get("Industry"), "Q1 2025")
+add_metric("Sector", general.get("Sector"), "Q1 2025")
+add_metric("Description", general.get("Description"), "—")
+add_metric("P/E", valuation.get("TrailingPE"), "TTM")
+add_metric("P/B", valuation.get("PriceBookMRQ"), "Q1 2025")
 
-    # Extract base info
-    general = fundamentals.get("General", {})
-    valuation = fundamentals.get("Valuation", {})
-    highlights = fundamentals.get("Highlights", {})
-    financials = fundamentals.get("Financials", {})
-    metrics = fundamentals.get("Metrics", {})
+fcf = cash_flow_q.get("freeCashFlow")
+add_metric("FCF", f"${fcf/1e6:.2f} Million" if fcf else None, "Q1 2025")
 
-    latest_quarter = next(iter(financials.get("Income_Statement", {}).get("quarterly", {})), None)
-    latest_balance = next(iter(financials.get("Balance_Sheet", {}).get("quarterly", {})), None)
-    
-    income_data = financials.get("Income_Statement", {}).get("quarterly", {}).get(latest_quarter, {})
-    balance_data = financials.get("Balance_Sheet", {}).get("quarterly", {}).get(latest_balance, {})
-    cashflow_data = financials.get("Cash_Flow", {}).get("quarterly", {}).get(latest_quarter, {})
+ev = valuation.get("EnterpriseValue")
+ev_fcf = ev / fcf if ev and fcf else None
+add_metric("EV/FCF", round(ev_fcf, 2) if ev_fcf else None, "Q1 2025")
+add_metric("EV/EBITDA", valuation.get("EnterpriseValueEbitda"), "TTM")
 
-    # Build the data table
-    data = [
-        ("Ticker", ticker, "—"),
-        ("Data's Date", latest_quarter, "Q1 2025"),
-        ("Industry", general.get("Industry"), "Q1 2025"),
-        ("Sector", general.get("Sector"), "Q1 2025"),
-        ("Description", general.get("Description"), "—"),
-        ("P/E", highlights.get("PERatio"), "TTM"),
-        ("P/B", highlights.get("PriceToBookRatio"), "Q1 2025"),
-        ("FCF", f"${float(cashflow_data.get('FreeCashFlow', 0))/1e6:.2f} Million", "Q1 2025"),
-        ("EV/FCF", calculate_ev_fcf(valuation.get("Enterprise_Value", 0), float(cashflow_data.get("FreeCashFlow", 0))), "Q1 2025"),
-        ("EV/EBITDA", valuation.get("EVToEBITDA"), "TTM or Annualized"),
-        ("ROIC", metrics.get("ReturnOnInvestedCapital"), "TTM"),
-        ("ROE", highlights.get("ReturnOnEquityTTM"), "TTM"),
-        ("ROA", highlights.get("ReturnOnAssetsTTM"), "TTM"),
-        ("PEG (Trailing)", metrics.get("PEGRatio"), "TTM"),
-        ("PEG (Forward)", metrics.get("PEGRatioForward"), "TTM"),
-        ("EPS", highlights.get("EarningsShare"), "TTM"),
-        ("Market Cap", f"${valuation.get('Market_Capitalization') / 1e9:.2f} Billion", "Q1 2025"),
-        ("Revenue", f"${float(income_data.get('totalRevenue', 0))/1e6:.2f} Million", "Q1 2025"),
-        ("Gross Profit", f"${float(income_data.get('grossProfit', 0))/1e6:.2f} Million", "Q1 2025"),
-        ("Debt / Equity", calculate_debt_equity(float(balance_data.get("totalLiab", 0)), float(balance_data.get("totalStockholderEquity", 1))), "Q1 2025"),
-        ("Enterprise Value", f"${valuation.get('Enterprise_Value') / 1e9:.2f} Billion", "Q1 2025"),
-        ("Dividend Yield", highlights.get("DividendYield"), "Q1 2025"),
-        ("Payout Ratio", highlights.get("PayoutRatio"), "Q1 2025"),
-        ("MOAT", "See Below", "—"),
-    ]
+# ROIC
+net_income = highlights.get("NetIncomeTTM")
+total_equity = bs_q.get("totalStockholderEquity")
+total_debt = bs_q.get("shortLongTermDebtTotal")
+if net_income and total_equity and total_debt:
+    invested_capital = total_equity + total_debt
+    roic = net_income / invested_capital * 100 if invested_capital else None
+    add_metric("ROIC", f"{roic:.2f}%", "TTM")
+else:
+    add_metric("ROIC", None, "TTM")
 
-    df = pd.DataFrame(data, columns=["Metric", "Value", "Period"])
-    st.dataframe(df, use_container_width=True)
+add_metric("ROE", f"{highlights.get('ReturnOnEquityTTM') * 100:.2f}%" if highlights.get('ReturnOnEquityTTM') else None, "TTM")
+add_metric("ROA", f"{highlights.get('ReturnOnAssetsTTM') * 100:.2f}%" if highlights.get('ReturnOnAssetsTTM') else None, "TTM")
+add_metric("PEG (Trailing)", valuation.get("PEGRatio"), "TTM")
+add_metric("PEG (Forward)", valuation.get("ForwardPEGRatio"), "TTM")
+add_metric("EPS", highlights.get("EarningsShare"), "TTM")
 
-    st.markdown("""
-    ### 🧠 MOAT Analysis
-    **PRM.US** operates in the specialty chemicals niche, specifically in firefighting products and phosphorus-based additives.
-    Its moat may be characterized by:
-    - **Specialization** in a highly regulated domain (fire retardants).
-    - **Switching Costs** due to performance-critical applications.
-    - **R&D focus**, protecting intellectual property.
-    - However, it may lack strong **brand power** or **network effects**, making this a moderate moat.
-    """)
+mc = valuation.get("Market_Capitalization")
+add_metric("Market Cap", f"${mc/1e9:.2f} Billion" if mc else None, "Q1 2025")
+add_metric("Revenue", f"${income_q.get('totalRevenue')/1e6:.2f} Million" if income_q.get('totalRevenue') else None, "Q1 2025")
+add_metric("Gross Profit", f"${income_q.get('grossProfit')/1e6:.2f} Million" if income_q.get('grossProfit') else None, "Q1 2025")
 
-if __name__ == "__main__":
-    main()
+# Debt / Equity
+if bs_q.get("totalLiab") and bs_q.get("totalStockholderEquity"):
+    debt_equity = bs_q["totalLiab"] / bs_q["totalStockholderEquity"]
+    add_metric("Debt / Equity", f"{debt_equity:.2f}", "Q1 2025")
+else:
+    add_metric("Debt / Equity", None, "Q1 2025")
+
+add_metric("Enterprise Value", f"${ev/1e9:.2f} Billion" if ev else None, "Q1 2025")
+add_metric("Dividend Yield", highlights.get("DividendYield") or "NONE", "Q1 2025")
+add_metric("Payout Ratio", highlights.get("PayoutRatio") or "NONE", "Q1 2025")
+
+# --- Display Table ---
+st.subheader("📊 Key Financial Metrics")
+st.dataframe({"Metric": [m[0] for m in metrics], "Value": [m[1] for m in metrics], "Period": [m[2] for m in metrics]})
+
+# --- Moat Analysis ---
+st.subheader("🛡️ MOAT Analysis: Perimeter Solutions (PRM.US)")
+st.markdown("""
+Perimeter Solutions appears to possess elements of a **narrow economic moat** due to:
+
+- **Specialized Niche**: The company is one of very few global providers of wildfire retardants and foams, operating under long-term contracts with federal agencies like the U.S. Forest Service.
+- **High Switching Costs**: Governments and municipalities are unlikely to switch suppliers easily due to safety, approval, and logistic constraints — giving PRM a defensible position.
+- **Regulatory Barriers**: Fire retardant products often require certifications and lengthy compliance processes, reducing new entrant threats.
+- **R&D and IP**: The specialty chemicals segment relies on unique formulations and expertise in phosphorus pentasulfide-based additives, which provides technical differentiation.
+
+**Weaknesses:**
+- Low ROIC and lack of strong FCF indicate some operational inefficiencies.
+- Revenue is highly seasonal and tied to wildfire activity — making cash flows unpredictable.
+
+**Conclusion**: PRM exhibits a **narrow moat**, driven primarily by its regulatory entrenchment and mission-critical products, though financials (e.g., FCF and ROIC) do not yet reinforce long-term economic power.
+""")
