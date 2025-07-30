@@ -1,122 +1,108 @@
 import streamlit as st
 import requests
+import os
+from datetime import datetime
 
-# Load API token securely
-try:
-    eodhd_token = st.secrets["eodhd"]["api_key"]
-except Exception:
-    st.error("Please set your EODHD API token in Streamlit secrets as `eodhd.api_key`.")
-    st.stop()
+# --- Streamlit App Config ---
+st.set_page_config(page_title="PRM.US Financial Dashboard", layout="wide")
+st.title("📊 PRM.US Financial Metrics and MOAT Analysis")
 
-ticker = "PRM.US"
+# --- API Token ---
+eodhd_token = st.secrets["eodhd"]["api_key"]
 base_url = "https://eodhd.com/api"
-headers = {"Accept": "application/json"}
 
-# Utility functions
-def get_json(url, params={}):
-    params["api_token"] = eodhd_token
-    params["fmt"] = "json"
-    response = requests.get(url, params=params, headers=headers)
-    return response.json()
-
+# --- Helper Functions ---
 def fetch_fundamentals():
-    return get_json(f"{base_url}/fundamentals/{ticker}")
+    url = f"{base_url}/fundamentals/PRM.US?api_token={eodhd_token}&fmt=json"
+    return requests.get(url).json()
 
 def fetch_financials():
-    return get_json(f"{base_url}/fundamentals/{ticker}", {"filter": "Financials::Cash_Flow::quarterly"})
+    url = f"{base_url}/fundamentals/PRM.US?api_token={eodhd_token}&filter=Financials::Cash_Flow::quarterly::2025-03-31"
+    return requests.get(url).json()
 
 def fetch_ratios():
-    return get_json(f"{base_url}/fundamentals/{ticker}", {"filter": "Financials::Ratios::quarterly"})
+    url = f"{base_url}/fundamentals/PRM.US?api_token={eodhd_token}&filter=Financials::Financial_Ratios::quarterly"
+    return requests.get(url).json()
 
-def fetch_valuation():
-    return get_json(f"{base_url}/fundamentals/{ticker}", {"filter": "Valuation"})
-
-def fetch_technicals():
-    return get_json(f"{base_url}/fundamentals/{ticker}", {"filter": "Technicals"})
-
-def fetch_highlights():
-    return get_json(f"{base_url}/fundamentals/{ticker}", {"filter": "Highlights"})
-
-# Build Streamlit UI
-st.set_page_config(page_title="PRM.US Fundamental Analysis", layout="wide")
-st.title("📊 PRM.US - Fundamental Analysis & MOAT Assessment")
-
-# Pull data
-fundamentals = fetch_fundamentals()
-highlights = fetch_highlights()
-valuation = fetch_valuation()
-technicals = fetch_technicals()
+# --- Load Data ---
+data = fetch_fundamentals()
 ratios = fetch_ratios()
-cash_flows = fetch_financials()
+cashflow = fetch_financials()
 
-desc = fundamentals.get("General", {}).get("Description", "—")
-sector = fundamentals.get("General", {}).get("Sector", "—")
-industry = fundamentals.get("General", {}).get("Industry", "—")
+# --- Extract Values ---
+valuation = data.get("Valuation", {})
+highlights = data.get("Highlights", {})
+general = data.get("General", {})
 
-# Extract Metrics
-pe = highlights.get("PERatio")
-pb = highlights.get("PriceBookMRQ")
-eps = highlights.get("EPS")
-div_yield = highlights.get("DividendYield")
-payout = highlights.get("PayoutRatio")
-market_cap = valuation.get("Market_Capitalization")
-ev = valuation.get("Enterprise_Value")
-ev_ebitda = valuation.get("EVToEBITDA")
-peg_trailing = valuation.get("PEGRatio")
-peg_forward = valuation.get("ForwardPEGRatio")
-roe = ratios.get("2025-03-31", {}).get("ReturnOnEquity")
-roa = ratios.get("2025-03-31", {}).get("ReturnOnAssets")
-roic = ratios.get("2025-03-31", {}).get("ReturnOnInvestedCapital")
-debt_equity = ratios.get("2025-03-31", {}).get("DebtEquityRatio")
-revenue = fundamentals.get("Financials", {}).get("Income_Statement", {}).get("quarterly", {}).get("2025-03-31", {}).get("totalRevenue")
-gross_profit = fundamentals.get("Financials", {}).get("Income_Statement", {}).get("quarterly", {}).get("2025-03-31", {}).get("grossProfit")
-fcf = fundamentals.get("Financials", {}).get("Cash_Flow", {}).get("quarterly", {}).get("2025-03-31", {}).get("freeCashFlow")
+revenue = data.get("Financials", {}).get("Income_Statement", {}).get("quarterly", {}).get("2025-03-31", {}).get("totalRevenue")
+gross_profit = data.get("Financials", {}).get("Income_Statement", {}).get("quarterly", {}).get("2025-03-31", {}).get("grossProfit")
 
-# Calculate EV/FCF
-ev_fcf = ev / fcf if fcf and ev else None
+fcf = cashflow.get("freeCashFlow")
+debt_to_equity = None
+roe = roa = roic = peg_trailing = peg_forward = None
 
-# Build table
-st.subheader("📋 Key Metrics (Q1 2025 / TTM)")
-table_data = []
+# Safely extract latest available ratio
+for period, row in ratios.items():
+    if period.startswith("2025"):
+        roe = row.get("ReturnOnEquity")
+        roa = row.get("ReturnOnAssets")
+        roic = row.get("ReturnOnInvestedCapital")
+        debt_to_equity = row.get("DebtEquity")
+        peg_trailing = row.get("PEGRatio")
+        peg_forward = row.get("ForwardPEGRatio")
+        break
 
-def add_metric(name, value, period):
-    table_data.append((name, value if value is not None else "—", period))
+# --- Render Table ---
+def add_metric(label, value, period):
+    st.markdown(f"<tr><td><b>{label}</b></td><td>{value or 'N/A'}</td><td>{period}</td></tr>", unsafe_allow_html=True)
 
-add_metric("Ticker", ticker, "—")
+st.markdown("""
+<style>
+table {width: 100%; border-collapse: collapse;}
+th, td {border: 1px solid #ddd; padding: 8px; text-align: left;}
+th {background-color: #f4f4f4;}
+</style>
+<table>
+<thead><tr><th>Metric</th><th>Value</th><th>Period</th></tr></thead>
+<tbody>
+""", unsafe_allow_html=True)
+
+add_metric("Ticker", "PRM.US", "—")
 add_metric("Data's Date", "2025-03-31", "Q1 2025")
-add_metric("Industry", industry, "Q1 2025")
-add_metric("Sector", sector, "Q1 2025")
-add_metric("Description", desc, "—")
-add_metric("P/E", f"{pe:.2f}" if pe else None, "TTM")
-add_metric("P/B", f"{pb:.2f}" if pb else None, "Q1 2025")
-add_metric("FCF", f"${fcf/1e6:.2f} Million" if fcf is not None else None, "Q1 2025")
-add_metric("EV/FCF", f"{ev_fcf:.2f}" if ev_fcf else None, "Q1 2025")
-add_metric("EV/EBITDA", f"{ev_ebitda:.2f}" if ev_ebitda else None, "TTM")
-add_metric("ROIC", f"{roic*100:.2f}%" if roic else None, "TTM")
-add_metric("ROE", f"{roe*100:.2f}%" if roe else None, "TTM")
-add_metric("ROA", f"{roa*100:.2f}%" if roa else None, "TTM")
-add_metric("PEG (Trailing)", f"{peg_trailing:.2f}" if peg_trailing else None, "TTM")
-add_metric("PEG (Forward)", f"{peg_forward:.2f}" if peg_forward else None, "TTM")
-add_metric("EPS", f"{eps:.2f}" if eps else None, "TTM")
-add_metric("Market Cap", f"${market_cap/1e9:.2f} Billion" if market_cap else None, "Q1 2025")
+add_metric("Industry", general.get("Industry"), "Q1 2025")
+add_metric("Sector", general.get("Sector"), "Q1 2025")
+add_metric("Description", general.get("Description"), "—")
+add_metric("P/E", highlights.get("PERatio"), "TTM")
+add_metric("P/B", highlights.get("PriceBook"), "Q1 2025")
+add_metric("FCF", f"${fcf/1e6:.2f} Million" if fcf else None, "Q1 2025")
+add_metric("EV/FCF", highlights.get("EVToFCF"), "Q1 2025")
+add_metric("EV/EBITDA", highlights.get("EVToEBITDA"), "TTM")
+add_metric("ROIC", f"{roic:.2%}" if roic else None, "TTM")
+add_metric("ROE", f"{roe:.2%}" if roe else None, "TTM")
+add_metric("ROA", f"{roa:.2%}" if roa else None, "TTM")
+add_metric("PEG (Trailing)", peg_trailing, "TTM")
+add_metric("PEG (Forward)", peg_forward, "TTM")
+add_metric("EPS", highlights.get("EarningsShare"), "TTM")
+add_metric("Market Cap", f"${valuation.get('Market_Capitalization') / 1e9:.2f} Billion", "Q1 2025")
 add_metric("Revenue", f"${revenue/1e6:.2f} Million" if revenue else None, "Q1 2025")
 add_metric("Gross Profit", f"${gross_profit/1e6:.2f} Million" if gross_profit else None, "Q1 2025")
-add_metric("Debt / Equity", f"{debt_equity:.2f}" if debt_equity else None, "Q1 2025")
-add_metric("Enterprise Value", f"${ev/1e9:.2f} Billion" if ev else None, "Q1 2025")
-add_metric("Dividend Yield", f"{div_yield*100:.2f}%" if div_yield else "NONE", "Q1 2025")
-add_metric("Payout Ratio", f"{payout*100:.2f}%" if payout else "NONE", "Q1 2025")
+add_metric("Debt / Equity", f"{debt_to_equity:.2f}" if debt_to_equity else None, "Q1 2025")
+add_metric("Enterprise Value", f"${highlights.get('EnterpriseValue') / 1e9:.2f} Billion", "Q1 2025")
+add_metric("Dividend Yield", highlights.get("DividendYield") or "NONE", "Q1 2025")
+add_metric("Payout Ratio", highlights.get("PayoutRatio") or "NONE", "Q1 2025")
 add_metric("MOAT", "See Below", "—")
 
-st.dataframe(table_data, use_container_width=True, hide_index=True)
-
-# Add MOAT section
-st.subheader("🛡 MOAT Analysis")
 st.markdown("""
-**PRM.US** shows characteristics of a narrow economic moat:
-- Specialized products in firefighting & chemical additives
-- Moderate ROIC (4.19%) and strong Gross Margin
-- High Debt/Equity (2.57), but growing FCF
-- PEG Ratio Forward (4.14) suggests expected slower growth
+</tbody></table>
+""", unsafe_allow_html=True)
 
-Overall: **Emerging MOAT** — worth watching closely as fundamentals improve.
+# --- MOAT Analysis ---
+st.subheader("🛡 Competitive Advantage (MOAT) Analysis")
+st.markdown("""
+This section evaluates the company's potential sustainable advantages based on profitability, capital efficiency, and valuation multiples:
+- **Profitability**: Strong margins and return metrics.
+- **Efficiency**: High ROIC, solid FCF.
+- **Valuation**: Reasonable multiples like P/E and EV/EBITDA.
+
+PRM.US exhibits **moderate moat potential**, driven by specialized products and moderate returns. However, high Debt/Equity suggests some financial risk.
 """)
